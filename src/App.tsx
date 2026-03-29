@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as React from 'react';
 import { useState, useEffect, FormEvent } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from 'react-router-dom';
 import { 
@@ -10,6 +11,7 @@ import {
   User, 
   Trash2, 
   Plus, 
+  Edit,
   LogOut, 
   Package, 
   ChevronRight, 
@@ -26,7 +28,9 @@ import {
   MessageCircle,
   Send,
   Sparkles,
-  TrendingDown
+  TrendingDown,
+  Play,
+  Video
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -58,6 +62,110 @@ import { db, auth } from './firebase';
 import { cn } from './lib/utils';
 import { seedProducts } from './seed';
 import { Product, Order, OrderItem } from './types';
+
+// --- Error Boundary Component ---
+
+class GlobalErrorBoundary extends (React.Component as any) {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error('Uncaught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let errorMessage = "Desculpe, algo deu errado.";
+      try {
+        const parsedError = JSON.parse(this.state.error?.message || "");
+        if (parsedError.error?.includes("Missing or insufficient permissions")) {
+          errorMessage = "Você não tem permissão para acessar estes dados. Verifique se você é um administrador.";
+        }
+      } catch (e) {}
+
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-cream-50 px-4">
+          <div className="max-w-md w-full bg-white p-10 rounded-[40px] shadow-2xl text-center border border-forest-50">
+            <div className="w-20 h-20 bg-rose-50 rounded-3xl flex items-center justify-center mx-auto mb-8 border border-rose-100 shadow-sm">
+              <XCircle className="w-10 h-10 text-rose-600" />
+            </div>
+            <h2 className="text-3xl font-serif font-bold text-forest-900 mb-4 tracking-tight">Ops! Algo deu errado</h2>
+            <p className="text-forest-600 mb-10 font-medium">{errorMessage}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full forest-gradient text-white py-4 rounded-2xl font-bold text-lg hover:scale-105 transition-all shadow-lg"
+            >
+              Recarregar Página
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// --- Firestore Error Handling ---
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // Display a user-friendly message
+  toast.error("Erro de permissão ou conexão com o banco de dados. Verifique se você tem permissão para esta ação.");
+  throw new Error(JSON.stringify(errInfo));
+}
 
 // --- AI Chat Component ---
 
@@ -220,6 +328,7 @@ const Navbar = ({ cartCount, user }: { cartCount: number; user: FirebaseUser | n
 const Catalog = ({ addToCart }: { addToCart: (p: Product) => void }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
@@ -232,6 +341,32 @@ const Catalog = ({ addToCart }: { addToCart: (p: Product) => void }) => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <AnimatePresence>
+        {selectedVideo && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.5, x: 20, y: 20 }}
+            animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
+            exit={{ opacity: 0, scale: 0.5, x: 20, y: 20 }}
+            className="fixed bottom-24 right-6 z-[110] w-48 h-48 rounded-full overflow-hidden border-4 border-emerald-400 shadow-2xl bg-black group"
+          >
+            <video 
+              src={selectedVideo} 
+              autoPlay 
+              loop 
+              muted 
+              playsInline
+              className="w-full h-full object-cover"
+            />
+            <button 
+              onClick={() => setSelectedVideo(null)}
+              className="absolute top-2 right-2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="mb-16 text-center">
         <h1 className="text-5xl md:text-7xl font-serif font-bold text-forest-900 mb-6 tracking-tighter">
           Fragrâncias <span className="text-gold-500 italic">Exclusivas</span>
@@ -257,11 +392,11 @@ const Catalog = ({ addToCart }: { addToCart: (p: Product) => void }) => {
               viewport={{ once: true }}
               className="group bg-white rounded-[40px] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 border border-forest-50"
             >
-              <div className="relative h-[350px] overflow-hidden">
+              <div className="relative h-[350px] overflow-hidden cursor-pointer" onClick={() => product.videoUrl && setSelectedVideo(product.videoUrl)}>
                 <img 
                   src={product.imageUrl} 
                   alt={product.name}
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                   referrerPolicy="no-referrer"
                 />
                 <div className="absolute top-6 left-6 flex flex-col space-y-2">
@@ -275,6 +410,13 @@ const Catalog = ({ addToCart }: { addToCart: (p: Product) => void }) => {
                     </div>
                   )}
                 </div>
+                {product.videoUrl && (
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/10">
+                    <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/30">
+                      <Play className="w-8 h-8 text-white fill-white" />
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="p-8">
                 <h3 className="text-2xl font-serif font-bold text-forest-900 mb-2 group-hover:text-gold-500 transition-colors">{product.name}</h3>
@@ -411,8 +553,7 @@ const CheckoutPage = ({ cart, clearCart }: { cart: OrderItem[]; clearCart: () =>
       clearCart();
       toast.success('Pedido realizado com sucesso!');
     } catch (error) {
-      console.error(error);
-      toast.error('Erro ao realizar pedido. Tente novamente.');
+      handleFirestoreError(error, OperationType.WRITE, 'orders');
     } finally {
       setIsSubmitting(false);
     }
@@ -549,7 +690,10 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
-  const [newProduct, setNewProduct] = useState({ name: '', description: '', price: '', originalPrice: '', imageUrl: '' });
+  const [isEditingProduct, setIsEditingProduct] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [newProduct, setNewProduct] = useState({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '' });
+  const [editProductForm, setEditProductForm] = useState({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '' });
   const [importUrl, setImportUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   
@@ -600,6 +744,7 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
         price: (data.price * 0.9).toFixed(2), // 10% discount by default
         imageUrl: data.imageUrl || '',
         description: data.description || '',
+        videoUrl: '',
       });
       toast.success('Informações importadas com sucesso!');
       setImportUrl('');
@@ -616,10 +761,14 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
     
     const unsubProducts = onSnapshot(query(collection(db, 'products'), orderBy('createdAt', 'desc')), (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'products');
     });
 
     const unsubOrders = onSnapshot(query(collection(db, 'orders'), orderBy('createdAt', 'desc')), (snapshot) => {
       setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'orders');
     });
 
     return () => {
@@ -638,11 +787,41 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
         createdAt: new Date().toISOString()
       });
       setIsAddingProduct(false);
-      setNewProduct({ name: '', description: '', price: '', originalPrice: '', imageUrl: '' });
+      setNewProduct({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '' });
       toast.success('Produto adicionado!');
     } catch (error) {
-      toast.error('Erro ao adicionar produto.');
+      handleFirestoreError(error, OperationType.WRITE, 'products');
     }
+  };
+
+  const handleEditProduct = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+    try {
+      await updateDoc(doc(db, 'products', editingProduct.id), {
+        ...editProductForm,
+        price: parseFloat(editProductForm.price),
+        originalPrice: parseFloat(editProductForm.originalPrice),
+      });
+      setIsEditingProduct(false);
+      setEditingProduct(null);
+      toast.success('Produto atualizado!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `products/${editingProduct.id}`);
+    }
+  };
+
+  const openEditModal = (product: Product) => {
+    setEditingProduct(product);
+    setEditProductForm({
+      name: product.name,
+      description: product.description,
+      price: product.price.toString(),
+      originalPrice: product.originalPrice?.toString() || '',
+      imageUrl: product.imageUrl,
+      videoUrl: product.videoUrl || ''
+    });
+    setIsEditingProduct(true);
   };
 
   const handleDeleteProduct = async (id: string) => {
@@ -654,7 +833,7 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
             await deleteDoc(doc(db, 'products', id));
             toast.success('Produto excluído!');
           } catch (error) {
-            toast.error('Erro ao excluir produto.');
+            handleFirestoreError(error, OperationType.DELETE, `products/${id}`);
           }
         },
       },
@@ -666,7 +845,7 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
       await updateDoc(doc(db, 'orders', id), { status });
       toast.success('Status atualizado!');
     } catch (error) {
-      toast.error('Erro ao atualizar status.');
+      handleFirestoreError(error, OperationType.UPDATE, `orders/${id}`);
     }
   };
 
@@ -863,12 +1042,20 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
                     <span className="text-xs text-forest-300 line-through">R$ {product.originalPrice?.toFixed(2)}</span>
                   </div>
                 </div>
-                <button 
-                  onClick={() => handleDeleteProduct(product.id)}
-                  className="p-3 text-forest-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                >
-                  <Trash2 className="w-6 h-6" />
-                </button>
+                <div className="flex space-x-2">
+                  <button 
+                    onClick={() => openEditModal(product)}
+                    className="p-3 text-forest-300 hover:text-forest-900 hover:bg-forest-50 rounded-xl transition-all"
+                  >
+                    <Edit className="w-6 h-6" />
+                  </button>
+                  <button 
+                    onClick={() => handleDeleteProduct(product.id)}
+                    className="p-3 text-forest-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                  >
+                    <Trash2 className="w-6 h-6" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1050,6 +1237,16 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
                   />
                 </div>
                 <div className="space-y-3">
+                  <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">URL do Vídeo (Opcional)</label>
+                  <input 
+                    type="url"
+                    value={newProduct.videoUrl}
+                    onChange={(e) => setNewProduct({...newProduct, videoUrl: e.target.value})}
+                    className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                    placeholder="https://exemplo.com/video.mp4"
+                  />
+                </div>
+                <div className="space-y-3">
                   <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Descrição</label>
                   <textarea 
                     required
@@ -1064,6 +1261,110 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
                   className="w-full forest-gradient text-white py-5 rounded-2xl font-bold text-xl hover:scale-105 transition-all shadow-xl"
                 >
                   Salvar Produto no Catálogo
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Edit Product Modal */}
+      <AnimatePresence>
+        {isEditingProduct && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsEditingProduct(false)}
+              className="absolute inset-0 bg-forest-900/60 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden"
+            >
+              <div className="p-10 border-b border-forest-50 flex justify-between items-center bg-cream-50">
+                <div>
+                  <h3 className="text-3xl font-serif font-bold text-forest-900">Editar Perfume</h3>
+                  <p className="text-forest-600 font-medium">Atualize as informações da fragrância.</p>
+                </div>
+                <button onClick={() => setIsEditingProduct(false)} className="p-3 hover:bg-white rounded-2xl transition-all shadow-sm border border-forest-50">
+                  <X className="w-7 h-7 text-forest-900" />
+                </button>
+              </div>
+
+              <form onSubmit={handleEditProduct} className="p-10 space-y-8">
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Nome do Perfume</label>
+                  <input 
+                    required
+                    type="text"
+                    value={editProductForm.name}
+                    onChange={(e) => setEditProductForm({...editProductForm, name: e.target.value})}
+                    className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Preço Boticário (R$)</label>
+                    <input 
+                      required
+                      type="number"
+                      step="0.01"
+                      value={editProductForm.originalPrice}
+                      onChange={(e) => setEditProductForm({...editProductForm, originalPrice: e.target.value})}
+                      className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Nosso Preço (R$)</label>
+                    <input 
+                      required
+                      type="number"
+                      step="0.01"
+                      value={editProductForm.price}
+                      onChange={(e) => setEditProductForm({...editProductForm, price: e.target.value})}
+                      className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">URL da Imagem</label>
+                  <input 
+                    required
+                    type="url"
+                    value={editProductForm.imageUrl}
+                    onChange={(e) => setEditProductForm({...editProductForm, imageUrl: e.target.value})}
+                    className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                  />
+                </div>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">URL do Vídeo (Opcional)</label>
+                  <input 
+                    type="url"
+                    value={editProductForm.videoUrl}
+                    onChange={(e) => setEditProductForm({...editProductForm, videoUrl: e.target.value})}
+                    className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                    placeholder="https://exemplo.com/video.mp4"
+                  />
+                </div>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Descrição</label>
+                  <textarea 
+                    required
+                    rows={3}
+                    value={editProductForm.description}
+                    onChange={(e) => setEditProductForm({...editProductForm, description: e.target.value})}
+                    className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                  />
+                </div>
+                <button 
+                  type="submit"
+                  className="w-full forest-gradient text-white py-5 rounded-2xl font-bold text-xl hover:scale-105 transition-all shadow-xl"
+                >
+                  Atualizar Produto
                 </button>
               </form>
             </motion.div>
@@ -1117,28 +1418,30 @@ export default function App() {
   const clearCart = () => setCart([]);
 
   return (
-    <Router>
-      <div className="min-h-screen bg-cream-50 text-forest-900 font-sans selection:bg-forest-100 selection:text-forest-900">
-        <Navbar cartCount={cart.reduce((acc, i) => acc + i.quantity, 0)} user={user} />
-        
-        <main className="pb-20">
-          <Routes>
-            <Route path="/" element={<Catalog addToCart={addToCart} />} />
-            <Route path="/cart" element={
-              <CartPage 
-                cart={cart} 
-                updateQuantity={updateQuantity} 
-                removeFromCart={removeFromCart} 
-              />
-            } />
-            <Route path="/checkout" element={<CheckoutPage cart={cart} clearCart={clearCart} />} />
-            <Route path="/admin" element={<AdminPanel user={user} />} />
-          </Routes>
-        </main>
+    <GlobalErrorBoundary>
+      <Router>
+        <div className="min-h-screen bg-cream-50 text-forest-900 font-sans selection:bg-forest-100 selection:text-forest-900">
+          <Navbar cartCount={cart.reduce((acc, i) => acc + i.quantity, 0)} user={user} />
+          
+          <main className="pb-20">
+            <Routes>
+              <Route path="/" element={<Catalog addToCart={addToCart} />} />
+              <Route path="/cart" element={
+                <CartPage 
+                  cart={cart} 
+                  updateQuantity={updateQuantity} 
+                  removeFromCart={removeFromCart} 
+                />
+              } />
+              <Route path="/checkout" element={<CheckoutPage cart={cart} clearCart={clearCart} />} />
+              <Route path="/admin" element={<AdminPanel user={user} />} />
+            </Routes>
+          </main>
 
-        <AIChat products={allProducts} />
-        <Toaster position="bottom-right" richColors />
-      </div>
-    </Router>
+          <AIChat products={allProducts} />
+          <Toaster position="bottom-right" richColors />
+        </div>
+      </Router>
+    </GlobalErrorBoundary>
   );
 }

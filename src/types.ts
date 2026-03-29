@@ -5,6 +5,7 @@ export interface Product {
   price: number;
   originalPrice: number;
   imageUrl: string;
+  videoUrl?: string;
   category: string;
   createdAt: string;
 }
