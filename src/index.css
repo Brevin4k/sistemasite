@@ -1,1 +1,54 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", serif;
+  
+  --color-forest-900: #0a1a0a;
+  --color-forest-800: #1a2e1a;
+  --color-forest-700: #2a4a2a;
+  --color-forest-600: #3a6a3a;
+  --color-moss-500: #5a7a40;
+  --color-moss-400: #7a9a60;
+  --color-cream-50: #fdfcf8;
+  --color-cream-100: #f5f2ed;
+  --color-gold-500: #c5a059;
+}
+
+@layer base {
+  body {
+    @apply bg-cream-50 text-forest-900 font-sans;
+  }
+  
+  h1, h2, h3, h4 {
+    @apply font-serif;
+  }
+}
+
+.glass-card {
+  @apply bg-white/70 backdrop-blur-md border border-white/20 shadow-xl;
+}
+
+.forest-gradient {
+  background: linear-gradient(135deg, var(--color-forest-900) 0%, var(--color-forest-700) 100%);
+}
+
+.btn-forest {
+  @apply bg-forest-800 text-cream-50 px-6 py-3 rounded-full font-bold transition-all hover:bg-forest-700 hover:scale-105 active:scale-95 shadow-lg;
+}
+
+.btn-gold {
+  @apply bg-gold-500 text-forest-900 px-6 py-3 rounded-full font-bold transition-all hover:opacity-90 hover:scale-105 active:scale-95 shadow-lg;
+}
+
+.price-tag {
+  @apply font-serif italic text-2xl text-forest-800;
+}
+
+.original-price {
+  @apply text-sm text-gray-400 line-through decoration-rose-400;
+}
+
+.discount-badge {
+  @apply bg-rose-500 text-white text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-tighter;
+}

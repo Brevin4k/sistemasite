@@ -22,7 +22,11 @@ import {
   X,
   ArrowLeft,
   QrCode,
-  Copy
+  Copy,
+  MessageCircle,
+  Send,
+  Sparkles,
+  TrendingDown
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -45,6 +49,8 @@ import {
   GoogleAuthProvider, 
   onAuthStateChanged, 
   signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   User as FirebaseUser
 } from 'firebase/auth';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -53,29 +59,156 @@ import { cn } from './lib/utils';
 import { seedProducts } from './seed';
 import { Product, Order, OrderItem } from './types';
 
+// --- AI Chat Component ---
+
+const AIChat = ({ products }: { products: Product[] }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [messages, setMessages] = useState<{ role: 'user' | 'model'; text: string }[]>([
+    { role: 'model', text: 'Olá! Sou o assistente virtual da PerfumsDelivery. Como posso ajudar você a escolher o perfume ideal hoje?' }
+  ]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSendMessage = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading) return;
+
+    const userMessage = input;
+    setInput('');
+    setMessages(prev => [...prev, { role: 'user', text: userMessage }]);
+    setIsLoading(true);
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({ 
+        model: "gemini-3-flash-preview",
+        contents: userMessage,
+        config: {
+          systemInstruction: `Você é o assistente de vendas da PerfumsDelivery, uma loja de perfumes que oferece preços melhores que o Boticário. 
+          Seu objetivo é ajudar os clientes a escolherem perfumes. 
+          Aqui está o catálogo atual: ${JSON.stringify(products.map(p => ({ name: p.name, price: p.price, originalPrice: p.originalPrice, description: p.description })))}.
+          Sempre destaque que nossos preços são menores que os do Boticário. Seja educado, prestativo e use um tom "florestal/natural" nas suas respostas.`
+        }
+      });
+
+      const text = response.text;
+      setMessages(prev => [...prev, { role: 'model', text: text || 'Desculpe, não consegui processar sua mensagem.' }]);
+    } catch (error) {
+      console.error('Erro no chat:', error);
+      setMessages(prev => [...prev, { role: 'model', text: 'Desculpe, tive um probleminha técnico. Pode repetir?' }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed bottom-6 right-6 z-[100]">
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="absolute bottom-20 right-0 w-[350px] h-[500px] bg-white rounded-3xl shadow-2xl border border-forest-100 flex flex-col overflow-hidden"
+          >
+            <div className="forest-gradient p-6 text-white flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold">Assistente Perfums</h3>
+                  <p className="text-[10px] opacity-70 uppercase tracking-widest">Online agora</p>
+                </div>
+              </div>
+              <button onClick={() => setIsOpen(false)} className="hover:bg-white/10 p-2 rounded-full transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-cream-50/30">
+              {messages.map((msg, i) => (
+                <div key={i} className={cn(
+                  "flex",
+                  msg.role === 'user' ? "justify-end" : "justify-start"
+                )}>
+                  <div className={cn(
+                    "max-w-[80%] p-4 rounded-2xl text-sm shadow-sm",
+                    msg.role === 'user' 
+                      ? "bg-forest-800 text-white rounded-tr-none" 
+                      : "bg-white text-forest-900 rounded-tl-none border border-forest-50"
+                  )}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              {isLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white p-4 rounded-2xl rounded-tl-none border border-forest-50 flex space-x-1">
+                    <div className="w-1.5 h-1.5 bg-forest-300 rounded-full animate-bounce" />
+                    <div className="w-1.5 h-1.5 bg-forest-300 rounded-full animate-bounce [animation-delay:0.2s]" />
+                    <div className="w-1.5 h-1.5 bg-forest-300 rounded-full animate-bounce [animation-delay:0.4s]" />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleSendMessage} className="p-4 border-t border-forest-50 bg-white">
+              <div className="flex items-center space-x-2 bg-gray-50 rounded-2xl px-4 py-2 border border-gray-100">
+                <input 
+                  type="text"
+                  placeholder="Tire sua dúvida..."
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  className="flex-1 bg-transparent border-none outline-none text-sm py-2"
+                />
+                <button type="submit" className="text-forest-800 hover:text-forest-600 transition-colors">
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-16 h-16 forest-gradient text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-all active:scale-95 group"
+      >
+        <MessageCircle className="w-8 h-8 group-hover:rotate-12 transition-transform" />
+      </button>
+    </div>
+  );
+};
+
 // --- Components ---
 
 const Navbar = ({ cartCount, user }: { cartCount: number; user: FirebaseUser | null }) => {
   return (
-    <nav className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+    <nav className="sticky top-0 z-50 bg-cream-50/80 backdrop-blur-md border-b border-forest-100">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          <Link to="/" className="flex items-center space-x-2">
-            <ShoppingBag className="w-8 h-8 text-rose-600" />
-            <span className="text-xl font-bold tracking-tight text-gray-900">Essência Delivery</span>
+        <div className="flex justify-between h-20 items-center">
+          <Link to="/" className="flex items-center space-x-2 group">
+            <div className="w-10 h-10 forest-gradient rounded-xl flex items-center justify-center group-hover:rotate-6 transition-transform">
+              <ShoppingBag className="w-6 h-6 text-white" />
+            </div>
+            <span className="text-2xl font-serif font-bold text-forest-900 tracking-tight">Perfums<span className="text-gold-500">Delivery</span></span>
           </Link>
           
-          <div className="flex items-center space-x-4">
-            <Link to="/admin" className="p-2 text-gray-500 hover:text-rose-600 transition-colors">
-              <User className="w-6 h-6" />
+          <div className="flex items-center space-x-6">
+            <Link to="/admin" className="text-forest-600 hover:text-forest-900 font-bold transition-colors flex items-center space-x-2">
+              <User className="w-5 h-5" />
+              <span className="hidden sm:inline">Admin</span>
             </Link>
-            <Link to="/cart" className="relative p-2 text-gray-500 hover:text-rose-600 transition-colors">
-              <ShoppingBag className="w-6 h-6" />
-              {cartCount > 0 && (
-                <span className="absolute top-0 right-0 bg-rose-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                  {cartCount}
-                </span>
-              )}
+            <Link to="/cart" className="relative group">
+              <div className="bg-white p-3 rounded-xl border border-forest-100 shadow-sm group-hover:bg-forest-50 transition-colors">
+                <ShoppingBag className="w-6 h-6 text-forest-800" />
+                {cartCount > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-rose-600 text-white text-[10px] font-bold w-6 h-6 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                    {cartCount}
+                  </span>
+                )}
+              </div>
             </Link>
           </div>
         </div>
@@ -91,66 +224,80 @@ const Catalog = ({ addToCart }: { addToCart: (p: Product) => void }) => {
   useEffect(() => {
     const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
-      setProducts(prods);
+      setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
       setLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-rose-600"></div>
-      </div>
-    );
-  }
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <header className="mb-12">
-        <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-4">Nossa Coleção</h1>
-        <p className="text-lg text-gray-600 max-w-2xl">
-          Descubra fragrâncias exclusivas selecionadas para você. Entrega rápida e pagamento seguro via Pix.
+      <div className="mb-16 text-center">
+        <h1 className="text-5xl md:text-7xl font-serif font-bold text-forest-900 mb-6 tracking-tighter">
+          Fragrâncias <span className="text-gold-500 italic">Exclusivas</span>
+        </h1>
+        <p className="text-lg text-forest-600 max-w-2xl mx-auto font-medium">
+          Descubra o luxo do Boticário com preços que só a <span className="text-forest-800 font-bold">PerfumsDelivery</span> oferece.
         </p>
-      </header>
+      </div>
 
-      {products.length === 0 ? (
-        <div className="text-center py-20 bg-gray-50 rounded-3xl border-2 border-dashed border-gray-200">
-          <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-xl font-medium text-gray-900">Nenhum perfume disponível</h3>
-          <p className="text-gray-500">Volte mais tarde para conferir as novidades.</p>
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="bg-white rounded-[40px] h-[500px] animate-pulse shadow-sm" />
+          ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
           {products.map((product) => (
-            <motion.div
+            <motion.div 
               key={product.id}
               initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="group bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-100"
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="group bg-white rounded-[40px] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 border border-forest-50"
             >
-              <div className="aspect-square overflow-hidden bg-gray-100 relative">
-                <img
-                  src={product.imageUrl}
+              <div className="relative h-[350px] overflow-hidden">
+                <img 
+                  src={product.imageUrl} 
                   alt={product.name}
-                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full shadow-sm">
-                  <span className="text-rose-600 font-bold">R$ {product.price.toFixed(2)}</span>
+                <div className="absolute top-6 left-6 flex flex-col space-y-2">
+                  <div className="bg-white/90 backdrop-blur-md px-4 py-1.5 rounded-full text-[10px] font-bold text-forest-800 uppercase tracking-widest shadow-sm">
+                    Original Boticário
+                  </div>
+                  {product.originalPrice > product.price && (
+                    <div className="bg-rose-500 text-white px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg flex items-center space-x-1">
+                      <TrendingDown className="w-3 h-3" />
+                      <span>-{Math.round((1 - product.price / product.originalPrice) * 100)}% OFF</span>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-1">{product.name}</h3>
-                <p className="text-sm text-gray-500 mb-4 line-clamp-2">{product.description}</p>
-                <button
-                  onClick={() => addToCart(product)}
-                  className="w-full bg-gray-900 text-white py-3 rounded-xl font-semibold hover:bg-rose-600 transition-colors flex items-center justify-center space-x-2"
-                >
-                  <Plus className="w-5 h-5" />
-                  <span>Adicionar ao Carrinho</span>
-                </button>
+              <div className="p-8">
+                <h3 className="text-2xl font-serif font-bold text-forest-900 mb-2 group-hover:text-gold-500 transition-colors">{product.name}</h3>
+                <p className="text-forest-600 text-sm mb-6 line-clamp-2 leading-relaxed">{product.description}</p>
+                
+                <div className="flex items-end justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-gray-400 font-medium">No Boticário:</span>
+                      <span className="text-sm text-gray-400 line-through">R$ {product.originalPrice?.toFixed(2) || (product.price * 1.2).toFixed(2)}</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs text-forest-600 font-bold uppercase tracking-tighter">Nosso Preço:</span>
+                      <span className="text-3xl font-serif font-bold text-forest-900">R$ {product.price.toFixed(2)}</span>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => addToCart(product)}
+                    className="w-14 h-14 forest-gradient text-white rounded-2xl flex items-center justify-center hover:scale-110 transition-all active:scale-95 shadow-lg"
+                  >
+                    <Plus className="w-7 h-7" />
+                  </button>
+                </div>
               </div>
             </motion.div>
           ))}
@@ -402,9 +549,15 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [isAddingProduct, setIsAddingProduct] = useState(false);
-  const [newProduct, setNewProduct] = useState({ name: '', description: '', price: '', imageUrl: '' });
+  const [newProduct, setNewProduct] = useState({ name: '', description: '', price: '', originalPrice: '', imageUrl: '' });
   const [importUrl, setImportUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
+  
+  // Auth state
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleImportFromUrl = async () => {
     if (!importUrl) {
@@ -443,7 +596,8 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
       const data = JSON.parse(response.text);
       setNewProduct({
         name: data.name || '',
-        price: data.price?.toString() || '',
+        originalPrice: data.price?.toString() || '',
+        price: (data.price * 0.9).toFixed(2), // 10% discount by default
         imageUrl: data.imageUrl || '',
         description: data.description || '',
       });
@@ -480,10 +634,11 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
       await addDoc(collection(db, 'products'), {
         ...newProduct,
         price: parseFloat(newProduct.price),
+        originalPrice: parseFloat(newProduct.originalPrice),
         createdAt: new Date().toISOString()
       });
       setIsAddingProduct(false);
-      setNewProduct({ name: '', description: '', price: '', imageUrl: '' });
+      setNewProduct({ name: '', description: '', price: '', originalPrice: '', imageUrl: '' });
       toast.success('Produto adicionado!');
     } catch (error) {
       toast.error('Erro ao adicionar produto.');
@@ -515,54 +670,115 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
     }
   };
 
-  const handleLogin = async () => {
+  const handleAuth = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      toast.error("Preencha todos os campos.");
+      return;
+    }
+    
+    setIsLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      toast.success("Login realizado com sucesso!");
-    } catch (error: any) {
-      console.error("Erro ao fazer login:", error);
-      if (error.code === 'auth/popup-blocked') {
-        toast.error("O pop-up de login foi bloqueado pelo seu navegador. Por favor, permita pop-ups para este site.");
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        // User closed the popup, no need to show error
+      if (isRegistering) {
+        await createUserWithEmailAndPassword(auth, email, password);
+        toast.success("Conta criada com sucesso!");
       } else {
-        toast.error("Erro ao fazer login: " + (error.message || "Tente novamente."));
+        await signInWithEmailAndPassword(auth, email, password);
+        toast.success("Login realizado com sucesso!");
       }
+    } catch (error: any) {
+      console.error("Erro na autenticação:", error);
+      let message = "Ocorreu um erro. Tente novamente.";
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+        message = isRegistering ? "Erro ao criar conta. Verifique os dados." : "E-mail ou senha incorretos. Se ainda não tem conta, use a aba 'Registrar'.";
+      }
+      if (error.code === 'auth/wrong-password') message = "Senha incorreta.";
+      if (error.code === 'auth/invalid-email') message = "E-mail inválido.";
+      if (error.code === 'auth/email-already-in-use') message = "Este e-mail já está em uso.";
+      if (error.code === 'auth/weak-password') message = "A senha deve ter pelo menos 6 caracteres.";
+      if (error.code === 'auth/operation-not-allowed') {
+        message = "O login por E-mail/Senha está desativado no Firebase Console. Por favor, ative-o em Authentication > Sign-in method.";
+      }
+      toast.error(message, { duration: 6000 });
+    } finally {
+      setIsLoading(false);
     }
   };
 
   if (!user) {
     return (
-      <div className="max-w-md mx-auto px-4 py-20 text-center">
-        <User className="w-16 h-16 text-gray-200 mx-auto mb-6" />
-        <h2 className="text-3xl font-bold mb-4">Acesso Restrito</h2>
-        <p className="text-gray-600 mb-8">Faça login para gerenciar sua loja.</p>
-        <button 
-          onClick={handleLogin}
-          className="w-full bg-gray-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center space-x-3 hover:bg-gray-800 transition-all mb-6"
-        >
-          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" alt="Google" />
-          <span>Entrar com Google</span>
-        </button>
-        <p className="text-xs text-gray-400">
-          Dica: Se o login não abrir, tente abrir o site em uma nova aba.
-        </p>
+      <div className="max-w-md mx-auto px-4 py-20">
+        <div className="text-center mb-10">
+          <div className="w-20 h-20 forest-gradient rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-xl">
+            <User className="w-10 h-10 text-white" />
+          </div>
+          <h2 className="text-4xl font-serif font-bold text-forest-900 mb-4 tracking-tight">
+            {isRegistering ? 'Criar Conta' : 'Acesso Restrito'}
+          </h2>
+          <p className="text-forest-600 font-medium">
+            {isRegistering ? 'Registre-se para gerenciar sua perfumaria.' : 'Faça login para gerenciar sua perfumaria exclusiva.'}
+          </p>
+        </div>
+
+        <form onSubmit={handleAuth} className="space-y-6 bg-white p-8 rounded-[32px] border border-forest-50 shadow-xl">
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">E-mail</label>
+            <input 
+              required
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+              placeholder="seu@email.com"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Senha</label>
+            <input 
+              required
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+              placeholder="••••••••"
+            />
+          </div>
+          <button 
+            disabled={isLoading}
+            type="submit"
+            className="w-full forest-gradient text-white py-5 rounded-2xl font-bold text-lg hover:scale-105 transition-all shadow-lg disabled:opacity-50"
+          >
+            {isLoading ? 'Processando...' : (isRegistering ? 'Registrar' : 'Entrar')}
+          </button>
+        </form>
+
+        <div className="mt-8 text-center">
+          <button 
+            onClick={() => setIsRegistering(!isRegistering)}
+            className="text-forest-600 font-bold hover:text-gold-600 transition-colors"
+          >
+            {isRegistering ? 'Já tem uma conta? Entre aqui' : 'Não tem conta? Registre-se'}
+          </button>
+        </div>
       </div>
     );
   }
 
-  if (user.email !== "gustavolangue@outlook.com") {
+  const allowedAdmins = ["gustavolangue@outlook.com", "admin@perfums.com"];
+  if (!allowedAdmins.includes(user.email || "")) {
     return (
       <div className="max-w-md mx-auto px-4 py-20 text-center">
-        <XCircle className="w-16 h-16 text-rose-600 mx-auto mb-6" />
-        <h2 className="text-3xl font-bold mb-4">Acesso Negado</h2>
-        <p className="text-gray-600 mb-8">Você não tem permissão para acessar este painel.</p>
+        <div className="w-20 h-20 bg-rose-50 rounded-3xl flex items-center justify-center mx-auto mb-8 border border-rose-100 shadow-sm">
+          <XCircle className="w-10 h-10 text-rose-600" />
+        </div>
+        <h2 className="text-4xl font-serif font-bold text-forest-900 mb-4 tracking-tight">Acesso Pendente</h2>
+        <p className="text-forest-600 mb-10 font-medium">Sua conta ({user.email}) foi criada, mas ainda não tem permissão de administrador.</p>
         <button 
           onClick={() => signOut(auth)}
-          className="text-rose-600 font-bold hover:underline"
+          className="text-rose-600 font-bold hover:underline flex items-center justify-center space-x-2 mx-auto"
         >
-          Sair e tentar com outra conta
+          <LogOut className="w-5 h-5" />
+          <span>Sair e tentar com outra conta</span>
         </button>
       </div>
     );
@@ -570,24 +786,27 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-16 gap-8">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Painel Administrativo</h1>
-          <p className="text-gray-500">Bem-vindo, {user.displayName}</p>
+          <h1 className="text-4xl font-serif font-bold text-forest-900 tracking-tight">Painel Administrativo</h1>
+          <div className="flex items-center space-x-2 mt-2">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <p className="text-forest-600 font-medium">Bem-vindo, <span className="text-forest-900 font-bold">{user.displayName}</span></p>
+          </div>
         </div>
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-6">
           <button 
             onClick={async () => {
               await seedProducts();
               toast.success('Produtos iniciais adicionados!');
             }}
-            className="text-xs text-gray-400 hover:text-gray-600 underline mr-4"
+            className="text-sm text-forest-400 hover:text-forest-600 font-medium underline decoration-forest-200 underline-offset-4 transition-colors"
           >
             Adicionar Amostras
           </button>
           <button 
             onClick={() => signOut(auth)}
-            className="flex items-center space-x-2 text-gray-500 hover:text-rose-600 font-bold"
+            className="flex items-center space-x-2 text-forest-600 hover:text-rose-600 font-bold transition-colors bg-white px-6 py-3 rounded-2xl border border-forest-100 shadow-sm"
           >
             <LogOut className="w-5 h-5" />
             <span>Sair</span>
@@ -595,111 +814,128 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
         </div>
       </div>
 
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-2xl mb-12 w-fit">
+      <div className="flex space-x-2 bg-white p-2 rounded-3xl mb-16 w-fit shadow-sm border border-forest-50">
         <button 
           onClick={() => setActiveTab('products')}
           className={cn(
-            "px-8 py-3 rounded-xl font-bold transition-all",
-            activeTab === 'products' ? "bg-white text-rose-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            "px-10 py-4 rounded-2xl font-bold transition-all flex items-center space-x-2",
+            activeTab === 'products' ? "forest-gradient text-white shadow-lg" : "text-forest-600 hover:bg-forest-50"
           )}
         >
-          Produtos
+          <ShoppingBag className="w-5 h-5" />
+          <span>Produtos</span>
         </button>
         <button 
           onClick={() => setActiveTab('orders')}
           className={cn(
-            "px-8 py-3 rounded-xl font-bold transition-all",
-            activeTab === 'orders' ? "bg-white text-rose-600 shadow-sm" : "text-gray-500 hover:text-gray-700"
+            "px-10 py-4 rounded-2xl font-bold transition-all flex items-center space-x-2",
+            activeTab === 'orders' ? "forest-gradient text-white shadow-lg" : "text-forest-600 hover:bg-forest-50"
           )}
         >
-          Pedidos
+          <Package className="w-5 h-5" />
+          <span>Pedidos</span>
         </button>
       </div>
 
       {activeTab === 'products' ? (
-        <div className="space-y-8">
+        <div className="space-y-10">
           <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Gerenciar Perfumes</h2>
+            <h2 className="text-3xl font-serif font-bold text-forest-900">Gerenciar Perfumes</h2>
             <button 
               onClick={() => setIsAddingProduct(true)}
-              className="bg-rose-600 text-white px-6 py-3 rounded-xl font-bold flex items-center space-x-2 hover:bg-rose-700 transition-all"
+              className="forest-gradient text-white px-8 py-4 rounded-2xl font-bold flex items-center space-x-3 hover:scale-105 transition-all shadow-lg"
             >
-              <Plus className="w-5 h-5" />
+              <Plus className="w-6 h-6" />
               <span>Novo Produto</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {products.map(product => (
-              <div key={product.id} className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex items-center space-x-4">
-                <img src={product.imageUrl} className="w-20 h-20 object-cover rounded-xl" alt={product.name} />
+              <div key={product.id} className="bg-white p-6 rounded-[32px] border border-forest-50 shadow-sm flex items-center space-x-6 hover:shadow-xl transition-all group">
+                <div className="relative w-24 h-24 rounded-2xl overflow-hidden">
+                  <img src={product.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" alt={product.name} />
+                </div>
                 <div className="flex-1">
-                  <h3 className="font-bold text-gray-900">{product.name}</h3>
-                  <p className="text-rose-600 font-bold">R$ {product.price.toFixed(2)}</p>
+                  <h3 className="font-serif font-bold text-forest-900 text-lg">{product.name}</h3>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-forest-800 font-bold">R$ {product.price.toFixed(2)}</span>
+                    <span className="text-xs text-forest-300 line-through">R$ {product.originalPrice?.toFixed(2)}</span>
+                  </div>
                 </div>
                 <button 
                   onClick={() => handleDeleteProduct(product.id)}
-                  className="p-2 text-gray-400 hover:text-rose-600 transition-colors"
+                  className="p-3 text-forest-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
                 >
-                  <Trash2 className="w-5 h-5" />
+                  <Trash2 className="w-6 h-6" />
                 </button>
               </div>
             ))}
           </div>
         </div>
       ) : (
-        <div className="space-y-8">
-          <h2 className="text-2xl font-bold">Pedidos Recentes</h2>
-          <div className="space-y-6">
+        <div className="space-y-10">
+          <h2 className="text-3xl font-serif font-bold text-forest-900">Pedidos Recentes</h2>
+          <div className="space-y-8">
             {orders.map(order => (
-              <div key={order.id} className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm">
-                <div className="flex flex-col lg:flex-row justify-between gap-8">
+              <div key={order.id} className="bg-white p-10 rounded-[40px] border border-forest-50 shadow-sm hover:shadow-xl transition-all">
+                <div className="flex flex-col lg:flex-row justify-between gap-12">
                   <div className="flex-1">
-                    <div className="flex items-center space-x-3 mb-4">
-                      <span className="text-xs font-bold uppercase tracking-widest text-gray-400">Pedido #{order.id.slice(-6)}</span>
+                    <div className="flex items-center space-x-4 mb-6">
+                      <span className="text-xs font-bold uppercase tracking-widest text-forest-400 bg-forest-50 px-4 py-1.5 rounded-full">Pedido #{order.id.slice(-6)}</span>
                       <span className={cn(
-                        "px-3 py-1 rounded-full text-xs font-bold",
+                        "px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest",
                         order.status === 'pending' && "bg-amber-100 text-amber-700",
-                        order.status === 'paid' && "bg-green-100 text-green-700",
+                        order.status === 'paid' && "bg-emerald-100 text-emerald-700",
                         order.status === 'shipped' && "bg-blue-100 text-blue-700",
-                        order.status === 'delivered' && "bg-gray-100 text-gray-700",
+                        order.status === 'delivered' && "bg-forest-100 text-forest-700",
                         order.status === 'cancelled' && "bg-rose-100 text-rose-700",
                       )}>
-                        {order.status.toUpperCase()}
+                        {order.status}
                       </span>
                     </div>
-                    <h3 className="text-xl font-bold mb-2">{order.customerName}</h3>
-                    <p className="text-gray-500 text-sm mb-1">{order.email} • {order.phone}</p>
-                    <p className="text-gray-500 text-sm mb-6">{order.address}</p>
+                    <h3 className="text-2xl font-serif font-bold text-forest-900 mb-3">{order.customerName}</h3>
+                    <div className="flex flex-wrap gap-4 text-forest-600 text-sm mb-8 font-medium">
+                      <div className="flex items-center space-x-2">
+                        <User className="w-4 h-4" />
+                        <span>{order.email}</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <ShoppingBag className="w-4 h-4" />
+                        <span>{order.phone}</span>
+                      </div>
+                    </div>
+                    <p className="text-forest-600 text-sm mb-10 bg-cream-50 p-4 rounded-2xl border border-forest-50 italic">"{order.address}"</p>
                     
-                    <div className="space-y-2">
+                    <div className="space-y-4">
+                      <p className="text-xs font-bold text-forest-400 uppercase tracking-widest">Itens do Pedido</p>
                       {order.items.map((item, idx) => (
-                        <div key={idx} className="text-sm flex justify-between">
-                          <span className="text-gray-600">{item.quantity}x {item.name}</span>
-                          <span className="font-bold">R$ {(item.price * item.quantity).toFixed(2)}</span>
+                        <div key={idx} className="flex justify-between items-center p-3 bg-white rounded-xl border border-forest-50">
+                          <span className="text-forest-800 font-bold">{item.quantity}x <span className="font-serif text-forest-900 ml-2">{item.name}</span></span>
+                          <span className="font-bold text-forest-900">R$ {(item.price * item.quantity).toFixed(2)}</span>
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  <div className="lg:w-64 flex flex-col justify-between items-end">
-                    <div className="text-right">
-                      <p className="text-gray-400 text-xs uppercase font-bold mb-1">Total</p>
-                      <p className="text-2xl font-extrabold text-gray-900">R$ {order.total.toFixed(2)}</p>
+                  <div className="lg:w-80 flex flex-col justify-between items-end bg-forest-900 p-8 rounded-[32px] text-white shadow-2xl">
+                    <div className="text-right w-full">
+                      <p className="text-forest-300 text-xs uppercase font-bold tracking-widest mb-2">Valor Total</p>
+                      <p className="text-5xl font-serif font-bold text-gold-500">R$ {order.total.toFixed(2)}</p>
                     </div>
                     
-                    <div className="w-full space-y-2">
-                      <p className="text-xs font-bold text-gray-400 uppercase">Ações</p>
+                    <div className="w-full space-y-4 mt-12">
+                      <p className="text-xs font-bold text-forest-300 uppercase tracking-widest">Atualizar Status</p>
                       <select 
                         value={order.status}
                         onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value as Order['status'])}
-                        className="w-full px-4 py-2 rounded-xl border border-gray-200 text-sm font-bold outline-none focus:ring-2 focus:ring-rose-500"
+                        className="w-full bg-forest-800 text-white px-6 py-4 rounded-2xl text-sm font-bold outline-none border border-forest-700 focus:ring-2 focus:ring-gold-500 transition-all appearance-none cursor-pointer"
                       >
-                        <option value="pending">Pendente</option>
-                        <option value="paid">Pago</option>
-                        <option value="shipped">Enviado</option>
-                        <option value="delivered">Entregue</option>
-                        <option value="cancelled">Cancelado</option>
+                        <option value="pending">Aguardando Pagamento</option>
+                        <option value="paid">Pagamento Confirmado</option>
+                        <option value="shipped">Produto Enviado</option>
+                        <option value="delivered">Pedido Entregue</option>
+                        <option value="cancelled">Pedido Cancelado</option>
                       </select>
                     </div>
                   </div>
@@ -719,101 +955,115 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsAddingProduct(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-forest-900/60 backdrop-blur-md"
             />
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="relative bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden"
             >
-              <div className="p-8 border-b border-gray-100 flex justify-between items-center">
-                <h3 className="text-2xl font-bold">Novo Perfume</h3>
-                <button onClick={() => setIsAddingProduct(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                  <X className="w-6 h-6" />
+              <div className="p-10 border-b border-forest-50 flex justify-between items-center bg-cream-50">
+                <div>
+                  <h3 className="text-3xl font-serif font-bold text-forest-900">Novo Perfume</h3>
+                  <p className="text-forest-600 font-medium">Adicione uma nova fragrância ao seu catálogo.</p>
+                </div>
+                <button onClick={() => setIsAddingProduct(false)} className="p-3 hover:bg-white rounded-2xl transition-all shadow-sm border border-forest-50">
+                  <X className="w-7 h-7 text-forest-900" />
                 </button>
               </div>
               
-              <div className="px-8 pt-8 space-y-4">
-                <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
-                  <label className="text-xs font-bold text-rose-600 uppercase tracking-wider mb-2 block">Importar do Boticário</label>
-                  <div className="flex gap-2">
+              <div className="px-10 pt-10">
+                <div className="bg-forest-900 p-8 rounded-[32px] shadow-xl border border-forest-800">
+                  <label className="text-xs font-bold text-gold-500 uppercase tracking-widest mb-4 block">Importação Inteligente (Boticário)</label>
+                  <div className="flex gap-4">
                     <input 
                       type="url"
                       placeholder="Cole o link do produto aqui..."
                       value={importUrl}
                       onChange={(e) => setImportUrl(e.target.value)}
-                      className="flex-1 px-4 py-2 rounded-xl border border-rose-200 focus:ring-2 focus:ring-rose-500 outline-none text-sm"
+                      className="flex-1 bg-forest-800 text-white px-6 py-4 rounded-2xl border border-forest-700 focus:ring-2 focus:ring-gold-500 outline-none text-sm placeholder:text-forest-500"
                     />
                     <button 
                       type="button"
                       onClick={handleImportFromUrl}
                       disabled={isImporting}
-                      className="bg-rose-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-rose-700 transition-all disabled:opacity-50 flex items-center space-x-2"
+                      className="bg-gold-500 text-forest-900 px-8 py-4 rounded-2xl font-bold text-sm hover:scale-105 transition-all disabled:opacity-50 flex items-center space-x-3 shadow-lg"
                     >
                       {isImporting ? (
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <div className="w-5 h-5 border-3 border-forest-900/30 border-t-forest-900 rounded-full animate-spin" />
                       ) : (
-                        <Plus className="w-4 h-4" />
+                        <Plus className="w-5 h-5" />
                       )}
                       <span>{isImporting ? 'Importando...' : 'Importar'}</span>
                     </button>
                   </div>
-                  <p className="text-[10px] text-rose-400 mt-2 italic">
-                    * Isso preencherá automaticamente o nome, preço, imagem e descrição.
+                  <p className="text-[11px] text-forest-400 mt-4 italic leading-relaxed">
+                    * Nossa IA extrairá automaticamente o nome, preços, imagem e descrição diretamente do site oficial.
                   </p>
                 </div>
               </div>
 
-              <form onSubmit={handleAddProduct} className="p-8 space-y-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-bold text-gray-700">Nome do Perfume</label>
+              <form onSubmit={handleAddProduct} className="p-10 space-y-8">
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Nome do Perfume</label>
                   <input 
                     required
                     type="text"
                     value={newProduct.name}
                     onChange={(e) => setNewProduct({...newProduct, name: e.target.value})}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-500 outline-none"
+                    className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-gray-700">Preço (R$)</label>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Preço Boticário (R$)</label>
+                    <input 
+                      required
+                      type="number"
+                      step="0.01"
+                      value={newProduct.originalPrice}
+                      onChange={(e) => setNewProduct({...newProduct, originalPrice: e.target.value})}
+                      className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                    />
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Nosso Preço (R$)</label>
                     <input 
                       required
                       type="number"
                       step="0.01"
                       value={newProduct.price}
                       onChange={(e) => setNewProduct({...newProduct, price: e.target.value})}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-500 outline-none"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-gray-700">URL da Imagem</label>
-                    <input 
-                      required
-                      type="url"
-                      value={newProduct.imageUrl}
-                      onChange={(e) => setNewProduct({...newProduct, imageUrl: e.target.value})}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-500 outline-none"
+                      className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-bold text-gray-700">Descrição</label>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">URL da Imagem</label>
+                  <input 
+                    required
+                    type="url"
+                    value={newProduct.imageUrl}
+                    onChange={(e) => setNewProduct({...newProduct, imageUrl: e.target.value})}
+                    className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                  />
+                </div>
+                <div className="space-y-3">
+                  <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Descrição</label>
                   <textarea 
                     required
                     rows={3}
                     value={newProduct.description}
                     onChange={(e) => setNewProduct({...newProduct, description: e.target.value})}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-rose-500 outline-none"
+                    className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
                   />
                 </div>
                 <button 
                   type="submit"
-                  className="w-full bg-rose-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-rose-700 transition-all"
+                  className="w-full forest-gradient text-white py-5 rounded-2xl font-bold text-xl hover:scale-105 transition-all shadow-xl"
                 >
-                  Salvar Produto
+                  Salvar Produto no Catálogo
                 </button>
               </form>
             </motion.div>
@@ -827,10 +1077,19 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
 export default function App() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [cart, setCart] = useState<OrderItem[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
-    return () => unsubscribe();
+    
+    const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
+      setAllProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+    });
+
+    return () => {
+      unsubscribe();
+      unsubProducts();
+    };
   }, []);
 
   const addToCart = (product: Product) => {
@@ -859,7 +1118,7 @@ export default function App() {
 
   return (
     <Router>
-      <div className="min-h-screen bg-white text-gray-900 font-sans selection:bg-rose-100 selection:text-rose-900">
+      <div className="min-h-screen bg-cream-50 text-forest-900 font-sans selection:bg-forest-100 selection:text-forest-900">
         <Navbar cartCount={cart.reduce((acc, i) => acc + i.quantity, 0)} user={user} />
         
         <main className="pb-20">
@@ -877,6 +1136,7 @@ export default function App() {
           </Routes>
         </main>
 
+        <AIChat products={allProducts} />
         <Toaster position="bottom-right" richColors />
       </div>
     </Router>
