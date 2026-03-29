@@ -1,0 +1,5 @@
+{
+  "name": "Perfume Delivery Catalog",
+  "description": "Um catálogo elegante de perfumes com sistema de pedidos via Pix e painel administrativo.",
+  "requestFramePermissions": []
+}

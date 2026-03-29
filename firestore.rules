@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
+         request.auth.token.email == "gustavolangue@outlook.com");
+    }
+
+    function isValidProduct(data) {
+      return data.name is string && data.name.size() > 0 &&
+             data.price is number && data.price >= 0 &&
+             data.imageUrl is string;
+    }
+
+    function isValidOrder(data) {
+      return data.customerName is string && data.customerName.size() > 0 &&
+             data.email is string &&
+             data.address is string &&
+             data.phone is string &&
+             data.items is list &&
+             data.total is number &&
+             data.status in ['pending', 'paid', 'shipped', 'delivered', 'cancelled'];
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow create: if isValidOrder(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow write: if isAdmin();
+    }
+  }
+}
