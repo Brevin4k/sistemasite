@@ -30,7 +30,12 @@ import {
   Sparkles,
   TrendingDown,
   Play,
-  Video
+  Video,
+  Volume2,
+  VolumeX,
+  Zap,
+  HelpCircle,
+  Settings
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -41,11 +46,14 @@ import {
   onSnapshot, 
   query, 
   orderBy, 
+  where,
+  limit,
   doc, 
   updateDoc, 
   deleteDoc,
-  getDoc,
   setDoc,
+  getDoc,
+  getDocsFromServer,
   serverTimestamp
 } from 'firebase/firestore';
 import { 
@@ -141,6 +149,21 @@ interface FirestoreErrorInfo {
     }[];
   }
 }
+
+// --- Helper Functions ---
+
+const getYouTubeEmbedUrl = (url: string) => {
+  if (!url) return null;
+  const regExp = /^.*(?:youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=|shorts\/)([\w-]{11}).*/;
+  const match = url.match(regExp);
+  if (match && match[1]) {
+    const videoId = match[1];
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    // Added mute=1 for autoplay to work reliably, and loop=1
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&loop=1&playlist=${videoId}&controls=1&modestbranding=1&enablejsapi=1&origin=${origin}`;
+  }
+  return null;
+};
 
 const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
   const errInfo: FirestoreErrorInfo = {
@@ -325,10 +348,202 @@ const Navbar = ({ cartCount, user }: { cartCount: number; user: FirebaseUser | n
   );
 };
 
+// --- Welcome Video Component ---
+
+const WelcomeVideo = () => {
+  const [isOpen, setIsOpen] = useState(true);
+  const [isMuted, setIsMuted] = useState(true);
+  const [videoUrl, setVideoUrl] = useState("https://www.youtube.com/shorts/6Ct8YvK-3SI");
+  const [isPlaying, setIsPlaying] = useState(false);
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'welcome_video'), (docSnap) => {
+      if (docSnap.exists()) {
+        setVideoUrl(docSnap.data().url);
+      }
+    });
+
+    // Listen for custom event to play video
+    const handlePlayVideo = () => {
+      setIsOpen(true);
+      if (videoRef.current) {
+        videoRef.current.play().catch(e => console.log("Autoplay blocked", e));
+      }
+      setIsPlaying(true);
+    };
+
+    window.addEventListener('play-welcome-video', handlePlayVideo);
+    return () => {
+      unsub();
+      window.removeEventListener('play-welcome-video', handlePlayVideo);
+    };
+  }, []);
+
+  const ytUrl = getYouTubeEmbedUrl(videoUrl);
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.5, x: -50, y: 50 }}
+          animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
+          exit={{ opacity: 0, scale: 0.5, x: -50, y: 50 }}
+          className="fixed bottom-6 left-6 z-[110] w-48 h-48 md:w-56 md:h-56 rounded-full overflow-hidden border-4 border-gold-500 shadow-2xl bg-black group cursor-pointer"
+          onClick={() => {
+            if (!isPlaying) {
+              setIsPlaying(true);
+              if (videoRef.current) videoRef.current.play();
+            }
+          }}
+        >
+          {ytUrl ? (
+            <div className="relative w-full h-full">
+              <iframe 
+                src={ytUrl}
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[180%] h-[180%] border-none pointer-events-auto"
+                allow="autoplay; encrypted-media"
+                allowFullScreen
+                title="Welcome Video"
+              />
+              {!isPlaying && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/20 backdrop-blur-[2px]">
+                  <Play className="w-12 h-12 text-white fill-white animate-pulse" />
+                </div>
+              )}
+            </div>
+          ) : (
+            <video 
+              ref={videoRef}
+              src={videoUrl} 
+              autoPlay 
+              loop 
+              muted={isMuted}
+              playsInline
+              onPlay={() => setIsPlaying(true)}
+              className="w-full h-full object-cover"
+            />
+          )}
+          
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 items-center pointer-events-none">
+            <span className="text-[10px] text-white font-bold uppercase tracking-widest mb-1">Olá! Sou o Gustavo</span>
+            <div className="flex items-center space-x-1">
+              <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+              <span className="text-[8px] text-emerald-400 font-bold uppercase">Ao Vivo</span>
+            </div>
+          </div>
+
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-2 z-20">
+            {!ytUrl && (
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsMuted(!isMuted);
+                }}
+                className="bg-black/50 text-white p-2 rounded-full hover:bg-gold-500 transition-colors"
+              >
+                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              </button>
+            )}
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsOpen(false);
+              }}
+              className="bg-black/50 text-white p-2 rounded-full hover:bg-rose-600 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+// --- Scent Quiz Component (Innovative Idea) ---
+
+const ScentQuiz = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [step, setStep] = useState(0);
+
+  const questions = [
+    { q: "Qual o seu estilo?", options: ["Clássico", "Moderno", "Ousado", "Discreto"] },
+    { q: "Qual ocasião?", options: ["Trabalho", "Encontro", "Festa", "Dia a dia"] },
+    { q: "Preferência olfativa?", options: ["Doce", "Cítrico", "Amadeirado", "Floral"] }
+  ];
+
+  return (
+    <>
+      <button 
+        onClick={() => setIsOpen(true)}
+        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-gold-500 text-forest-900 px-6 py-3 rounded-full font-bold shadow-xl flex items-center space-x-2 hover:scale-105 transition-all active:scale-95 border-2 border-white/50"
+      >
+        <Sparkles className="w-5 h-5" />
+        <span>Descobrir meu Perfume</span>
+      </button>
+
+      <AnimatePresence>
+        {isOpen && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white rounded-[40px] max-w-md w-full p-10 shadow-2xl relative border border-gold-100"
+            >
+              <button onClick={() => setIsOpen(false)} className="absolute top-6 right-6 p-2 hover:bg-gray-100 rounded-full">
+                <X className="w-6 h-6" />
+              </button>
+
+              <div className="text-center mb-8">
+                <div className="w-16 h-16 bg-gold-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <HelpCircle className="w-8 h-8 text-gold-500" />
+                </div>
+                <h2 className="text-3xl font-serif font-bold text-forest-900">Scent Profile</h2>
+                <p className="text-forest-600 text-sm">Encontraremos sua fragrância ideal em 3 passos.</p>
+              </div>
+
+              {step < 3 ? (
+                <div className="space-y-4">
+                  <p className="text-center font-bold text-forest-800 mb-6">{questions[step].q}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {questions[step].options.map(opt => (
+                      <button 
+                        key={opt}
+                        onClick={() => setStep(step + 1)}
+                        className="p-4 rounded-2xl border-2 border-forest-50 hover:border-gold-500 hover:bg-gold-50 transition-all text-sm font-medium text-forest-700"
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-6">
+                  <CheckCircle2 className="w-16 h-16 text-emerald-500 mx-auto mb-4" />
+                  <h3 className="text-2xl font-bold text-forest-900 mb-2">Perfil Identificado!</h3>
+                  <p className="text-forest-600 mb-8">Recomendamos fragrâncias Amadeiradas e Intensas para você.</p>
+                  <button 
+                    onClick={() => { setIsOpen(false); setStep(0); }}
+                    className="w-full forest-gradient text-white py-4 rounded-2xl font-bold shadow-lg"
+                  >
+                    Ver Recomendações
+                  </button>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+};
+
 const Catalog = ({ addToCart }: { addToCart: (p: Product) => void }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
@@ -341,103 +556,90 @@ const Catalog = ({ addToCart }: { addToCart: (p: Product) => void }) => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <AnimatePresence>
-        {selectedVideo && (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.5, x: 20, y: 20 }}
-            animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
-            exit={{ opacity: 0, scale: 0.5, x: 20, y: 20 }}
-            className="fixed bottom-24 right-6 z-[110] w-48 h-48 rounded-full overflow-hidden border-4 border-emerald-400 shadow-2xl bg-black group"
-          >
-            <video 
-              src={selectedVideo} 
-              autoPlay 
-              loop 
-              muted 
-              playsInline
-              className="w-full h-full object-cover"
-            />
-            <button 
-              onClick={() => setSelectedVideo(null)}
-              className="absolute top-2 right-2 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <WelcomeVideo />
+      <ScentQuiz />
 
       <div className="mb-16 text-center">
+        <div className="inline-flex items-center space-x-2 bg-gold-50 px-4 py-1.5 rounded-full mb-6 border border-gold-100">
+          <Truck className="w-4 h-4 text-gold-500" />
+          <span className="text-[10px] font-bold text-gold-600 uppercase tracking-widest">Entrega Expressa em 45 min</span>
+        </div>
         <h1 className="text-5xl md:text-7xl font-serif font-bold text-forest-900 mb-6 tracking-tighter">
-          Fragrâncias <span className="text-gold-500 italic">Exclusivas</span>
+          Fragrâncias <span className="text-gold-500 italic underline decoration-gold-200 underline-offset-8">Exclusivas</span>
         </h1>
-        <p className="text-lg text-forest-600 max-w-2xl mx-auto font-medium">
-          Descubra o luxo do Boticário com preços que só a <span className="text-forest-800 font-bold">PerfumsDelivery</span> oferece.
+        <p className="text-lg text-forest-600 max-w-2xl mx-auto font-medium leading-relaxed">
+          Descubra o luxo do Boticário com a conveniência da <span className="text-forest-800 font-bold">PerfumsDelivery</span>. 
+          Sua essência favorita, na sua porta, em minutos.
         </p>
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="bg-white rounded-[40px] h-[500px] animate-pulse shadow-sm" />
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-8">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="bg-white/50 rounded-3xl h-[350px] animate-pulse shadow-sm" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-8">
           {products.map((product) => (
             <motion.div 
               key={product.id}
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              className="group bg-white rounded-[40px] overflow-hidden shadow-sm hover:shadow-2xl transition-all duration-500 border border-forest-50"
+              onClick={() => setSelectedProduct(product)}
+              className="group bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-500 border border-forest-50 cursor-pointer flex flex-col"
             >
-              <div className="relative h-[350px] overflow-hidden cursor-pointer" onClick={() => product.videoUrl && setSelectedVideo(product.videoUrl)}>
+              <div className="relative aspect-[4/5] overflow-hidden">
                 <img 
                   src={product.imageUrl} 
                   alt={product.name}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                  className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                   referrerPolicy="no-referrer"
                 />
-                <div className="absolute top-6 left-6 flex flex-col space-y-2">
-                  <div className="bg-white/90 backdrop-blur-md px-4 py-1.5 rounded-full text-[10px] font-bold text-forest-800 uppercase tracking-widest shadow-sm">
-                    Original Boticário
-                  </div>
-                  {product.originalPrice > product.price && (
-                    <div className="bg-rose-500 text-white px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg flex items-center space-x-1">
-                      <TrendingDown className="w-3 h-3" />
-                      <span>-{Math.round((1 - product.price / product.originalPrice) * 100)}% OFF</span>
-                    </div>
-                  )}
-                </div>
-                {product.videoUrl && (
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/10">
-                    <div className="w-16 h-16 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center border border-white/30">
-                      <Play className="w-8 h-8 text-white fill-white" />
-                    </div>
+                {product.originalPrice > product.price && (
+                  <div className="absolute top-3 right-3 bg-gold-500 text-forest-900 px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-tighter shadow-lg flex items-center space-x-1">
+                    <TrendingDown className="w-3 h-3" />
+                    <span>-{Math.round((1 - product.price / product.originalPrice) * 100)}%</span>
                   </div>
                 )}
               </div>
-              <div className="p-8">
-                <h3 className="text-2xl font-serif font-bold text-forest-900 mb-2 group-hover:text-gold-500 transition-colors">{product.name}</h3>
-                <p className="text-forest-600 text-sm mb-6 line-clamp-2 leading-relaxed">{product.description}</p>
-                
-                <div className="flex items-end justify-between">
-                  <div className="space-y-1">
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-gray-400 font-medium">No Boticário:</span>
-                      <span className="text-sm text-gray-400 line-through">R$ {product.originalPrice?.toFixed(2) || (product.price * 1.2).toFixed(2)}</span>
+              
+              <div className="p-5 flex flex-col flex-grow">
+                <div className="mb-3">
+                  <h3 className="text-lg md:text-xl font-serif font-bold text-forest-900 line-clamp-1 group-hover:text-gold-600 transition-colors">{product.name}</h3>
+                  <p className="text-forest-500 text-[10px] md:text-xs line-clamp-2 mt-1 leading-tight">{product.description}</p>
+                  <div className="flex items-center space-x-1 mt-2">
+                    <div className="flex">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <div key={i} className="w-2.5 h-2.5 bg-gold-500 rounded-full border-[0.5px] border-white" />
+                      ))}
                     </div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs text-forest-600 font-bold uppercase tracking-tighter">Nosso Preço:</span>
-                      <span className="text-3xl font-serif font-bold text-forest-900">R$ {product.price.toFixed(2)}</span>
-                    </div>
+                    <span className="text-[10px] text-forest-400 font-bold">4.9</span>
                   </div>
+                </div>
+                
+                <div className="mt-auto pt-4 border-t border-forest-50">
+                  <div className="flex flex-col mb-3">
+                    <span className="text-[10px] text-forest-300 font-bold uppercase tracking-widest">Boticário</span>
+                    <span className="text-xs text-forest-300 line-through font-medium">R$ {product.originalPrice?.toFixed(2)}</span>
+                  </div>
+                  
+                  <div className="flex flex-col mb-4">
+                    <span className="text-[10px] text-gold-600 font-bold uppercase tracking-widest">Nosso Valor</span>
+                    <span className="text-2xl font-serif font-black text-forest-900">R$ {product.price.toFixed(2)}</span>
+                  </div>
+
                   <button 
-                    onClick={() => addToCart(product)}
-                    className="w-14 h-14 forest-gradient text-white rounded-2xl flex items-center justify-center hover:scale-110 transition-all active:scale-95 shadow-lg"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      addToCart(product);
+                      window.dispatchEvent(new CustomEvent('play-welcome-video'));
+                    }}
+                    className="w-full forest-gradient text-white py-4 rounded-xl font-bold text-sm flex items-center justify-center space-x-2 hover:scale-[1.02] transition-all active:scale-95 shadow-md"
                   >
-                    <Plus className="w-7 h-7" />
+                    <ShoppingBag className="w-4 h-4" />
+                    <span>Adicionar</span>
                   </button>
                 </div>
               </div>
@@ -445,16 +647,108 @@ const Catalog = ({ addToCart }: { addToCart: (p: Product) => void }) => {
           ))}
         </div>
       )}
+
+      {/* Zoom Modal */}
+      <AnimatePresence>
+        {selectedProduct && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedProduct(null)}
+              className="absolute inset-0 bg-forest-900/80 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white w-full max-w-4xl rounded-[40px] shadow-2xl overflow-hidden flex flex-col md:flex-row"
+            >
+              <button 
+                onClick={() => setSelectedProduct(null)}
+                className="absolute top-6 right-6 z-10 p-3 bg-white/90 backdrop-blur-md rounded-full text-forest-900 hover:bg-forest-50 transition-all shadow-lg"
+              >
+                <X className="w-6 h-6" />
+              </button>
+
+              <div className="w-full md:w-1/2 aspect-square md:aspect-auto h-64 md:h-auto overflow-hidden">
+                <img 
+                  src={selectedProduct.imageUrl} 
+                  alt={selectedProduct.name}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              <div className="w-full md:w-1/2 p-8 md:p-12 flex flex-col">
+                <div className="mb-8">
+                  <div className="bg-gold-50 text-gold-600 px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest inline-block mb-4 border border-gold-100">
+                    Fragrância Premium
+                  </div>
+                  <h2 className="text-4xl md:text-5xl font-serif font-bold text-forest-900 mb-4">{selectedProduct.name}</h2>
+                  <div className="flex items-center space-x-3 mb-6">
+                    <div className="flex -space-x-1">
+                      {[1, 2, 3, 4, 5].map(i => (
+                        <div key={i} className="w-4 h-4 bg-gold-500 rounded-full border-2 border-white" />
+                      ))}
+                    </div>
+                    <span className="text-xs text-forest-400 font-bold uppercase tracking-widest">4.9 (120 reviews)</span>
+                  </div>
+                  <p className="text-forest-600 text-lg leading-relaxed font-medium">
+                    {selectedProduct.description}
+                  </p>
+                </div>
+
+                <div className="mt-auto space-y-8">
+                  <div className="flex items-end space-x-6">
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-forest-300 font-bold uppercase tracking-widest">Boticário</p>
+                      <p className="text-xl text-forest-300 line-through font-medium">R$ {selectedProduct.originalPrice?.toFixed(2)}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-gold-600 font-bold uppercase tracking-widest">Nosso Valor</p>
+                      <p className="text-5xl font-serif font-black text-forest-900">R$ {selectedProduct.price.toFixed(2)}</p>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => {
+                      addToCart(selectedProduct);
+                      setSelectedProduct(null);
+                      window.dispatchEvent(new CustomEvent('play-welcome-video'));
+                    }}
+                    className="w-full forest-gradient text-white py-6 rounded-2xl font-bold text-xl flex items-center justify-center space-x-4 hover:scale-[1.02] transition-all active:scale-95 shadow-2xl"
+                  >
+                    <ShoppingBag className="w-6 h-6" />
+                    <span>Adicionar ao Carrinho</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
 
-const CartPage = ({ cart, updateQuantity, removeFromCart }: { 
+const CartPage = ({ cart, updateQuantity, removeFromCart, addToCart }: { 
   cart: OrderItem[]; 
   updateQuantity: (id: string, q: number) => void;
   removeFromCart: (id: string) => void;
+  addToCart: (p: Product) => void;
 }) => {
+  const [upsellProducts, setUpsellProducts] = useState<Product[]>([]);
   const total = cart.reduce((acc, item) => acc + item.price * item.quantity, 0);
+
+  useEffect(() => {
+    const q = query(collection(db, 'products'), where('isUpsell', '==', true), limit(4));
+    const unsub = onSnapshot(q, (snapshot) => {
+      setUpsellProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+    });
+    return () => unsub();
+  }, []);
 
   if (cart.length === 0) {
     return (
@@ -501,7 +795,7 @@ const CartPage = ({ cart, updateQuantity, removeFromCart }: {
         ))}
       </div>
 
-      <div className="bg-gray-900 text-white p-8 rounded-3xl shadow-xl">
+      <div className="bg-gray-900 text-white p-8 rounded-3xl shadow-xl mb-12">
         <div className="flex justify-between items-center mb-8">
           <span className="text-gray-400 text-lg">Total do Pedido</span>
           <span className="text-3xl font-bold">R$ {total.toFixed(2)}</span>
@@ -514,6 +808,29 @@ const CartPage = ({ cart, updateQuantity, removeFromCart }: {
           <ChevronRight className="w-6 h-6" />
         </Link>
       </div>
+
+      {upsellProducts.length > 0 && (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-serif font-bold text-forest-900">Aproveite e Adicione Também</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {upsellProducts.filter(p => !cart.find(item => item.productId === p.id)).map(product => (
+              <div key={product.id} className="bg-white p-4 rounded-2xl border border-forest-50 shadow-sm flex items-center space-x-4">
+                <img src={product.imageUrl} alt={product.name} className="w-16 h-16 object-cover rounded-xl" />
+                <div className="flex-1">
+                  <h3 className="font-bold text-forest-900 text-sm">{product.name}</h3>
+                  <p className="text-gold-600 font-bold text-sm">R$ {product.price.toFixed(2)}</p>
+                </div>
+                <button 
+                  onClick={() => addToCart(product)}
+                  className="bg-forest-900 text-white p-2 rounded-xl hover:bg-forest-800 transition-all"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -686,14 +1003,15 @@ const CheckoutPage = ({ cart, clearCart }: { cart: OrderItem[]; clearCart: () =>
 };
 
 const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
-  const [activeTab, setActiveTab] = useState<'products' | 'orders'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'orders' | 'settings'>('products');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [welcomeVideoUrl, setWelcomeVideoUrl] = useState('https://www.youtube.com/shorts/6Ct8YvK-3SI');
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [isEditingProduct, setIsEditingProduct] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [newProduct, setNewProduct] = useState({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '' });
-  const [editProductForm, setEditProductForm] = useState({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '' });
+  const [newProduct, setNewProduct] = useState({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '', isUpsell: false });
+  const [editProductForm, setEditProductForm] = useState({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '', isUpsell: false });
   const [importUrl, setImportUrl] = useState('');
   const [isImporting, setIsImporting] = useState(false);
   
@@ -771,11 +1089,31 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
       handleFirestoreError(error, OperationType.GET, 'orders');
     });
 
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'welcome_video'), (docSnap) => {
+      if (docSnap.exists()) {
+        setWelcomeVideoUrl(docSnap.data().url);
+      }
+    });
+
     return () => {
       unsubProducts();
       unsubOrders();
+      unsubSettings();
     };
   }, [user]);
+
+  const handleUpdateWelcomeVideo = async (e: FormEvent) => {
+    e.preventDefault();
+    try {
+      await setDoc(doc(db, 'settings', 'welcome_video'), {
+        url: welcomeVideoUrl,
+        updatedAt: new Date().toISOString()
+      });
+      toast.success('Vídeo de boas-vindas atualizado!');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/welcome_video');
+    }
+  };
 
   const handleAddProduct = async (e: FormEvent) => {
     e.preventDefault();
@@ -787,7 +1125,7 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
         createdAt: new Date().toISOString()
       });
       setIsAddingProduct(false);
-      setNewProduct({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '' });
+      setNewProduct({ name: '', description: '', price: '', originalPrice: '', imageUrl: '', videoUrl: '', isUpsell: false });
       toast.success('Produto adicionado!');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'products');
@@ -819,7 +1157,8 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
       price: product.price.toString(),
       originalPrice: product.originalPrice?.toString() || '',
       imageUrl: product.imageUrl,
-      videoUrl: product.videoUrl || ''
+      videoUrl: product.videoUrl || '',
+      isUpsell: product.isUpsell || false
     });
     setIsEditingProduct(true);
   };
@@ -993,31 +1332,103 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
         </div>
       </div>
 
-      <div className="flex space-x-2 bg-white p-2 rounded-3xl mb-16 w-fit shadow-sm border border-forest-50">
-        <button 
-          onClick={() => setActiveTab('products')}
-          className={cn(
-            "px-10 py-4 rounded-2xl font-bold transition-all flex items-center space-x-2",
-            activeTab === 'products' ? "forest-gradient text-white shadow-lg" : "text-forest-600 hover:bg-forest-50"
-          )}
-        >
-          <ShoppingBag className="w-5 h-5" />
-          <span>Produtos</span>
-        </button>
-        <button 
-          onClick={() => setActiveTab('orders')}
-          className={cn(
-            "px-10 py-4 rounded-2xl font-bold transition-all flex items-center space-x-2",
-            activeTab === 'orders' ? "forest-gradient text-white shadow-lg" : "text-forest-600 hover:bg-forest-50"
-          )}
-        >
-          <Package className="w-5 h-5" />
-          <span>Pedidos</span>
-        </button>
-      </div>
+        <div className="flex space-x-2 bg-white p-2 rounded-3xl mb-16 w-fit shadow-sm border border-forest-50">
+          <button 
+            onClick={() => setActiveTab('products')}
+            className={cn(
+              "px-10 py-4 rounded-2xl font-bold transition-all flex items-center space-x-2",
+              activeTab === 'products' ? "forest-gradient text-white shadow-lg" : "text-forest-600 hover:bg-forest-50"
+            )}
+          >
+            <ShoppingBag className="w-5 h-5" />
+            <span>Produtos</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('orders')}
+            className={cn(
+              "px-10 py-4 rounded-2xl font-bold transition-all flex items-center space-x-2",
+              activeTab === 'orders' ? "forest-gradient text-white shadow-lg" : "text-forest-600 hover:bg-forest-50"
+            )}
+          >
+            <Package className="w-5 h-5" />
+            <span>Pedidos</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('settings')}
+            className={cn(
+              "px-10 py-4 rounded-2xl font-bold transition-all flex items-center space-x-2",
+              activeTab === 'settings' ? "forest-gradient text-white shadow-lg" : "text-forest-600 hover:bg-forest-50"
+            )}
+          >
+            <Settings className="w-5 h-5" />
+            <span>Configurações</span>
+          </button>
+        </div>
 
-      {activeTab === 'products' ? (
-        <div className="space-y-10">
+        {activeTab === 'settings' && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white p-10 rounded-[40px] border border-forest-50 shadow-xl max-w-2xl"
+          >
+            <div className="flex items-center space-x-4 mb-8">
+              <div className="w-12 h-12 bg-gold-50 rounded-2xl flex items-center justify-center">
+                <Video className="w-6 h-6 text-gold-600" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-serif font-bold text-forest-900">Vídeo de Boas-Vindas</h2>
+                <p className="text-forest-500 text-sm">Gerencie o vídeo que aparece no canto inferior do site.</p>
+              </div>
+            </div>
+            
+            <form onSubmit={handleUpdateWelcomeVideo} className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-forest-900 uppercase tracking-widest">Link do Vídeo (MP4 ou YouTube)</label>
+                <input 
+                  type="text"
+                  value={welcomeVideoUrl}
+                  onChange={(e) => setWelcomeVideoUrl(e.target.value)}
+                  className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
+                  placeholder="Ex: https://youtube.com/watch?v=... ou link direto .mp4"
+                />
+                <div className="bg-forest-50 p-4 rounded-2xl border border-forest-100 mt-4">
+                  <p className="text-xs text-forest-600 leading-relaxed">
+                    <span className="font-bold text-forest-900">Dica:</span> Use um vídeo curto (15-30s) de apresentação pessoal para criar conexão imediata com seus clientes. O sistema detecta automaticamente links do YouTube.
+                  </p>
+                </div>
+              </div>
+
+              {welcomeVideoUrl && (
+                <div className="mt-6 aspect-video rounded-2xl overflow-hidden border border-forest-100 bg-black">
+                  {getYouTubeEmbedUrl(welcomeVideoUrl) ? (
+                    <iframe 
+                      src={getYouTubeEmbedUrl(welcomeVideoUrl)}
+                      className="w-full h-full"
+                      allow="autoplay; encrypted-media"
+                      allowFullScreen
+                    />
+                  ) : (
+                    <video 
+                      src={welcomeVideoUrl}
+                      controls
+                      className="w-full h-full"
+                    />
+                  )}
+                </div>
+              )}
+
+              <button 
+                type="submit"
+                className="w-full forest-gradient text-white py-5 rounded-2xl font-bold text-lg hover:scale-[1.02] transition-all shadow-lg"
+              >
+                Salvar Configurações
+              </button>
+            </form>
+          </motion.div>
+        )}
+
+        {activeTab === 'products' && (
+          <div className="space-y-10">
           <div className="flex justify-between items-center">
             <h2 className="text-3xl font-serif font-bold text-forest-900">Gerenciar Perfumes</h2>
             <button 
@@ -1060,7 +1471,9 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
             ))}
           </div>
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'orders' && (
         <div className="space-y-10">
           <h2 className="text-3xl font-serif font-bold text-forest-900">Pedidos Recentes</h2>
           <div className="space-y-8">
@@ -1256,6 +1669,18 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
                     className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
                   />
                 </div>
+                <div className="flex items-center space-x-3 bg-cream-50 p-4 rounded-2xl border border-forest-50">
+                  <input 
+                    type="checkbox"
+                    id="isUpsellNew"
+                    checked={newProduct.isUpsell}
+                    onChange={(e) => setNewProduct({...newProduct, isUpsell: e.target.checked})}
+                    className="w-5 h-5 rounded border-forest-200 text-forest-800 focus:ring-forest-800"
+                  />
+                  <label htmlFor="isUpsellNew" className="text-sm font-bold text-forest-900 cursor-pointer">
+                    Marcar como Produto de Sugestão (Upsell no Carrinho)
+                  </label>
+                </div>
                 <button 
                   type="submit"
                   className="w-full forest-gradient text-white py-5 rounded-2xl font-bold text-xl hover:scale-105 transition-all shadow-xl"
@@ -1360,6 +1785,18 @@ const AdminPanel = ({ user }: { user: FirebaseUser | null }) => {
                     className="w-full px-6 py-4 rounded-2xl border border-forest-100 focus:ring-2 focus:ring-forest-800 outline-none font-medium bg-cream-50/50"
                   />
                 </div>
+                <div className="flex items-center space-x-3 bg-cream-50 p-4 rounded-2xl border border-forest-50">
+                  <input 
+                    type="checkbox"
+                    id="isUpsellEdit"
+                    checked={editProductForm.isUpsell}
+                    onChange={(e) => setEditProductForm({...editProductForm, isUpsell: e.target.checked})}
+                    className="w-5 h-5 rounded border-forest-200 text-forest-800 focus:ring-forest-800"
+                  />
+                  <label htmlFor="isUpsellEdit" className="text-sm font-bold text-forest-900 cursor-pointer">
+                    Marcar como Produto de Sugestão (Upsell no Carrinho)
+                  </label>
+                </div>
                 <button 
                   type="submit"
                   className="w-full forest-gradient text-white py-5 rounded-2xl font-bold text-xl hover:scale-105 transition-all shadow-xl"
@@ -1431,6 +1868,7 @@ export default function App() {
                   cart={cart} 
                   updateQuantity={updateQuantity} 
                   removeFromCart={removeFromCart} 
+                  addToCart={addToCart}
                 />
               } />
               <Route path="/checkout" element={<CheckoutPage cart={cart} clearCart={clearCart} />} />

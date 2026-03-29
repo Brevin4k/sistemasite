@@ -1,5 +1,15 @@
 {
   "entities": {
+    "Settings": {
+      "title": "Settings",
+      "description": "Global website settings.",
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["url"]
+    },
     "Product": {
       "title": "Product",
       "description": "A perfume product in the catalog.",
@@ -11,6 +21,7 @@
         "price": { "type": "number" },
         "imageUrl": { "type": "string" },
         "category": { "type": "string" },
+        "isUpsell": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "price", "imageUrl"]
@@ -42,6 +53,10 @@
     "/orders/{orderId}": {
       "schema": "Order",
       "description": "Collection of customer orders."
+    },
+    "/settings/{settingId}": {
+      "schema": "Settings",
+      "description": "Global website settings."
     }
   }
 }

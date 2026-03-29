@@ -7,6 +7,7 @@ export interface Product {
   imageUrl: string;
   videoUrl?: string;
   category: string;
+  isUpsell?: boolean;
   createdAt: string;
 }
 
